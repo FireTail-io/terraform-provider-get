@@ -90,6 +90,7 @@ func resourceArtifact() *schema.Resource {
                                 Description: "additional headers",
                                 Optional:    true,
                                 ForceNew:    true,
+				DefaultFunc: schema.EnvDefaultFunc("TERRAFORM_GET_HEADERS", nil),
 			},
 		},
 	}
@@ -103,16 +104,18 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
 
         header := &http.Header{}
         getAllHeaders := d.Get("headers").(string)
+
         headers := strings.Split(getAllHeaders, ",")
+
         for i := 0; i < len(headers); i++ {
                 headerString := strings.TrimSpace(headers[i])
                 splitHeaderString := strings.Split(headerString, ":")
-                header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[0]))
+                header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[1]))
         }
 
         httpGetter := &getter.HttpGetter{
-               Header: *header,
-	}
+                  Header: *header,
+        }
 
         getters := &[]getter.Getter{
                 httpGetter,
