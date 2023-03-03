@@ -20,8 +20,5 @@ func Provider() *schema.Provider {
 func configure(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	client := getter.DefaultClient
 
-        getters := getter.Getters
-	client.Getters = getters
-
 	return client, nil
 }
