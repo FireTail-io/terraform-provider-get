@@ -11,8 +11,8 @@ terraform {
       version = ">= 3.0.0"
     }
     get = {
-      source  = "cludden/get"
-      version = "0.1.0"
+      source  = "firetail-io/get"
+      version = "0.0.2"
     }
   }
 }
@@ -25,6 +25,7 @@ resource "get_artifact" "benthos_serverless" {
   mode     = "file"
   archive  = false
   workdir  = abspath(path.root)
+  headers  = "Authorization: Bearer ghp_8abdefg, Content-Type: application/octet-stream"
 }
 
 # provision lambda function
