@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/url"
+	"net/http"
 	"os"
 	"strings"
 
@@ -84,6 +85,12 @@ func resourceArtifact() *schema.Resource {
 				Optional:    true,
 				ForceNew:    true,
 			},
+			"headers": {
+                                Type:        schema.TypeString,
+                                Description: "additional headers",
+                                Optional:    true,
+                                ForceNew:    true,
+			},
 		},
 	}
 }
@@ -94,7 +101,25 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
 		return diag.FromErr(err)
 	}
 
-	client := m.(*getter.Client)
+        header := &http.Header{}
+        getAllHeaders := d.Get("headers").(string)
+        headers := strings.Split(getAllHeaders, ",")
+        for i := 0; i < len(headers); i++ {
+                headerString := strings.TrimSpace(headers[i])
+                splitHeaderString := strings.Split(headerString, ":")
+                header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[0]))
+        }
+
+        httpGetter := &getter.HttpGetter{
+               Header: *header,
+	}
+
+        getters := &[]getter.Getter{
+                httpGetter,
+        }
+
+	getter.Getters = *getters
+        client := m.(*getter.Client)
 
 	_, err = client.Get(ctx, req)
 	if err != nil {
