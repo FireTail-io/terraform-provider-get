@@ -102,27 +102,46 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
 		return diag.FromErr(err)
 	}
 
+	// setup a http header construct
         header := &http.Header{}
-        getAllHeaders := d.Get("headers").(string)
-
+	// get the string value with comma delimited from environment vars
+        getAllHeaders, ok := d.Get("headers").(string)
+	// split the string with commas
         headers := strings.Split(getAllHeaders, ",")
 
-        for i := 0; i < len(headers); i++ {
-                headerString := strings.TrimSpace(headers[i])
-                splitHeaderString := strings.Split(headerString, ":")
-                header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[1]))
-        }
-
-        httpGetter := &getter.HttpGetter{
-                  Header: *header,
-        }
-
-        getters := &[]getter.Getter{
-                httpGetter,
-        }
-
-	getter.Getters = *getters
+	// initialize the default values for go getter
+        getters := getter.Getters
         client := m.(*getter.Client)
+
+	// if getAllHeaders does not exist, we use the default configuration without headers
+	if !ok {
+                client.Getters = getters
+	} else {
+		// loop through the headers which is broken down
+                for i := 0; i < len(headers); i++ {
+			// trim header string from whitespaces
+                        headerString := strings.TrimSpace(headers[i])
+			// split the header string to key value
+                        splitHeaderString := strings.Split(headerString, ":")
+			// trim the header strings and add to header
+                        header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[1]))
+                }
+
+		// add the header which we did above ^^^
+                httpGetter := &getter.HttpGetter{
+                        Header: *header,
+                }
+
+		// set the getter to use HttpGetter
+                getters = []getter.Getter{
+                        httpGetter,
+                }
+
+		// set the Getters to use the getters abvove
+	        getter.Getters = getters
+		// intiialize the client with the getter
+                client = m.(*getter.Client)
+	}
 
 	_, err = client.Get(ctx, req)
 	if err != nil {
