@@ -105,18 +105,18 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
 	// setup a http header construct
         header := &http.Header{}
 	// get the string value with comma delimited from environment vars
-        getAllHeaders, ok := d.Get("headers").(string)
-	// split the string with commas
-        headers := strings.Split(getAllHeaders, ",")
+        getAllHeaders := d.Get("headers").(string)
 
 	// initialize the default values for go getter
         getters := getter.Getters
         client := m.(*getter.Client)
 
-	// if getAllHeaders does not exist, we use the default configuration without headers
-	if !ok {
+	// if getAllHeaders does not exist with empty string, we use the default configuration without headers
+	if getAllHeaders == "" {
                 client.Getters = getters
 	} else {
+	        // split the string with commas
+                headers := strings.Split(getAllHeaders, ",")
 		// loop through the headers which is broken down
                 for i := 0; i < len(headers); i++ {
 			// trim header string from whitespaces
