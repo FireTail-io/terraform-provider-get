@@ -5,17 +5,30 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
+	"io"
 	"fmt"
 	"net/url"
 	"net/http"
 	"os"
 	"strings"
+	"errors"
 
 	"github.com/hashicorp/go-getter/v2"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
+
+type Releases []struct {
+    AssetsUrl string `json:"assets_url"`
+    TagName string `json:"tag_name"`
+}
+
+type Assets []struct {
+    Name string `json:"name"`
+    Url string `json:"url"`
+}
 
 func resourceArtifact() *schema.Resource {
 	return &schema.Resource{
@@ -74,59 +87,146 @@ func resourceArtifact() *schema.Resource {
 				Description: "base64 encoded artifact checksum",
 				Computed:    true,
 			},
-			"url": {
-				Type:        schema.TypeString,
-				Description: "path to artifact (go-getter url)",
-				Required:    true,
-			},
+			//"url": {
+			//	Type:        schema.TypeString,
+			//	Description: "path to artifact (go-getter url)",
+			//	Required:    true,
+			//},
 			"workdir": {
 				Type:        schema.TypeString,
 				Description: "working directory",
 				Optional:    true,
 				ForceNew:    true,
 			},
-			"headers": {
+			"token": {
                                 Type:        schema.TypeString,
                                 Description: "additional headers",
                                 Optional:    true,
                                 ForceNew:    true,
-				DefaultFunc: schema.EnvDefaultFunc("TERRAFORM_GET_HEADERS", nil),
+				DefaultFunc: schema.EnvDefaultFunc("TERRAFORM_GITHUB_TOKEN", nil),
 			},
+                        "repo_org": {
+                                Type:        schema.TypeString,
+                                Description: "github repository organisation",
+                                Required:    true,
+                                ForceNew:    true,
+                        },
+                        "repo_name": {
+                                Type:        schema.TypeString,
+                                Description: "github repository name",
+                                Required:    true,
+                                ForceNew:    true,
+                        },
+			"release_version": {
+                                Type:        schema.TypeString,
+				Description: "github release version (release tag)",
+                                Required:    true,
+                                ForceNew:    true,
+			},
+                        "release_file": {
+                                Type:        schema.TypeString,
+                                Description: "github release file name",
+                                Required:    true,
+                                ForceNew:    true,
+                        },
 		},
 	}
 }
 
 func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+        repoOrg := d.Get("repo_org").(string)
+        repoName := d.Get("repo_name").(string)
+        releaseVer := d.Get("release_version").(string)
+        releaseFile := d.Get("release_file").(string)
+        token := d.Get("token").(string)
+
+        // Get release request
+        relReq, err := http.NewRequest("GET", "https://api.github.com/repos/"+repoOrg+"/"+repoName+"/releases", nil)
+	relReq.Header.Set("Authorization", "Bearer " + token)
+	relReq.Header.Set("Accept", "application/vnd.github+json")
+	relReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+        relClient := &http.Client{}
+	relRes, err := relClient.Do(relReq)
+        if err != nil {
+                return diag.FromErr(errors.New("Cannot access Github release API endpoint."))
+        }
+        defer relRes.Body.Close()
+        relBody, err := io.ReadAll(relRes.Body)
+
+        var releases Releases
+        json.Unmarshal(relBody, &releases)
+
+        var assetsUrl string
+        for i := 0; i < len(releases); i++ {
+                if releases[i].TagName == releaseVer {
+                        assetsUrl = releases[i].AssetsUrl
+                }
+        }
+
+        // Get assets request
+        assetsReq, err := http.NewRequest("GET", assetsUrl, nil)
+        assetsReq.Header.Set("Authorization", "Bearer " + token)
+        assetsReq.Header.Set("Accept", "application/vnd.github+json")
+        assetsReq.Header.Set("X-GitHub-Api-Version", "2022-11-28")
+	assetsClient := &http.Client{}
+	assetsRes, err := assetsClient.Do(assetsReq)
+        if err != nil {
+                return diag.FromErr(errors.New("Cannot access Github assets API endpoint."))
+        }
+        defer assetsRes.Body.Close()
+        assetsBody, err := io.ReadAll(assetsRes.Body)
+
+        var assets Assets
+        json.Unmarshal(assetsBody, &assets)
+
+        var assetUrl string
+        for i := 0; i < len(assets); i++ {
+                if assets[i].Name == releaseFile {
+                        assetUrl = assets[i].Url
+                }
+        }
+
 	req, err := resourceArtifactRequest(d)
 	if err != nil {
 		return diag.FromErr(err)
 	}
 
+        src, err := url.Parse(assetUrl)
+        if err != nil {
+                return diag.FromErr(err)
+        }
+        params := src.Query()
+
+        if archive, ok := d.GetOk("archive"); ok {
+                params.Set("archive", archive.(string))
+        }
+        if checksum, ok := d.GetOk("checksum"); ok {
+                params.Set("checksum", checksum.(string))
+        }
+        if insecure := d.Get("insecure").(bool); insecure {
+                params.Set("insecure", fmt.Sprintf("%v", insecure))
+        }
+        src.RawQuery = params.Encode()
+        req.Src = src.String()
+
+        if pwd, ok := d.GetOk("workdir"); ok {
+                req.Pwd = pwd.(string)
+        }
+
 	// setup a http header construct
         header := &http.Header{}
-	// get the string value with comma delimited from environment vars
-        getAllHeaders := d.Get("headers").(string)
 
 	// initialize the default values for go getter
         getters := getter.Getters
         client := m.(*getter.Client)
 
 	// if getAllHeaders does not exist with empty string, we use the default configuration without headers
-	if getAllHeaders == "" {
+	if token == "" {
                 client.Getters = getters
 	} else {
-	        // split the string with commas
-                headers := strings.Split(getAllHeaders, ",")
-		// loop through the headers which is broken down
-                for i := 0; i < len(headers); i++ {
-			// trim header string from whitespaces
-                        headerString := strings.TrimSpace(headers[i])
-			// split the header string to key value
-                        splitHeaderString := strings.Split(headerString, ":")
-			// trim the header strings and add to header
-                        header.Add(strings.TrimSpace(splitHeaderString[0]), strings.TrimSpace(splitHeaderString[1]))
-                }
-
+                header.Add("Authorization", "Bearer " + token)
+		header.Add("Accept", "application/octet-stream")
+		header.Add("X-GitHub-Api-Version", "2022-11-28")
 		// add the header which we did above ^^^
                 httpGetter := &getter.HttpGetter{
                         Header: *header,
@@ -245,27 +345,6 @@ func resourceArtifactRequest(d configProvider) (*getter.Request, error) {
 		return nil, fmt.Errorf("expected mode to be one of [any, dir, file], got: %s", d.Get("mode").(string))
 	}
 
-	src, err := url.Parse(d.Get("url").(string))
-	if err != nil {
-		return nil, fmt.Errorf("error parsing url: %v", err)
-	}
-	params := src.Query()
-
-	if archive, ok := d.GetOk("archive"); ok {
-		params.Set("archive", archive.(string))
-	}
-	if checksum, ok := d.GetOk("checksum"); ok {
-		params.Set("checksum", checksum.(string))
-	}
-	if insecure := d.Get("insecure").(bool); insecure {
-		params.Set("insecure", fmt.Sprintf("%v", insecure))
-	}
-	src.RawQuery = params.Encode()
-	req.Src = src.String()
-
-	if pwd, ok := d.GetOk("workdir"); ok {
-		req.Pwd = pwd.(string)
-	}
 	return req, nil
 }
 
