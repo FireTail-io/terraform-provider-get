@@ -98,13 +98,6 @@ func resourceArtifact() *schema.Resource {
 				Optional:    true,
 				ForceNew:    true,
 			},
-			"token": {
-                                Type:        schema.TypeString,
-                                Description: "additional headers",
-                                Optional:    true,
-                                ForceNew:    true,
-				DefaultFunc: schema.EnvDefaultFunc("TERRAFORM_GITHUB_TOKEN", nil),
-			},
                         "repo_org": {
                                 Type:        schema.TypeString,
                                 Description: "github repository organisation",
@@ -138,7 +131,7 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
         repoName := d.Get("repo_name").(string)
         releaseVer := d.Get("release_version").(string)
         releaseFile := d.Get("release_file").(string)
-        token := d.Get("token").(string)
+	token := os.Getenv("GITHUB_TOKEN")
 
         // Get release request
         relReq, err := http.NewRequest("GET", "https://api.github.com/repos/"+repoOrg+"/"+repoName+"/releases", nil)
