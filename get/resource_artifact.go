@@ -132,6 +132,9 @@ func resourceArtifactCreate(ctx context.Context, d *schema.ResourceData, m inter
         releaseVer := d.Get("release_version").(string)
         releaseFile := d.Get("release_file").(string)
 	token := os.Getenv("GITHUB_TOKEN")
+	if token == "" {
+                return diag.FromErr(errors.New("GITHUB_TOKEN environment variable not set!"))
+	}
 
         // Get release request
         relReq, err := http.NewRequest("GET", "https://api.github.com/repos/"+repoOrg+"/"+repoName+"/releases", nil)
